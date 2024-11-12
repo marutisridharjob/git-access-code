@@ -593,3 +593,68 @@ Build the Car of the Future at Eclipse SDV Hackathon 2024. Join us at ICF Karlsr
 FaviconGit SCM
 Git - JGit
 JGit has two basic levels of API: plumbing and porcelain. The terminology for these comes from Git itself, and JGit is divided into roughly the same kinds of areas: porcelain APIs are a friendly front...
+
+
+
+
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.Repository;
+import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.treewalk.TreeWalk;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.eclipse.jgit.lib.ObjectLoader;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+public class RemoteFileReader {
+    public static void main(String[] args) {
+        String remoteUrl = "https://github.com/your-username/your-repo.git"; // replace with your repository URL
+        String filePath = "path/to/your/file.txt"; // path to the file in the repository
+        String branch = "refs/heads/main"; // specify the branch
+        String username = "your-username"; // GitHub username
+        String password = "your-access-token"; // GitHub token (recommended instead of password)
+        
+        try {
+            readRemoteFile(remoteUrl, filePath, branch, username, password);
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+        }
+    }
+
+    public static void readRemoteFile(String remoteUrl, String filePath, String branch, String username, String password) {
+        try (Git git = Git.cloneRepository()
+                .setURI(remoteUrl)
+                .setCredentialsProvider(new UsernamePasswordCredentialsProvider(username, password))
+                .setNoCheckout(true) // Avoid full clone
+                .call()) {
+
+            Repository repository = git.getRepository();
+            ObjectId lastCommitId = repository.resolve(branch);
+
+            try (RevWalk revWalk = new RevWalk(repository)) {
+                TreeWalk treeWalk = new TreeWalk(repository);
+                treeWalk.addTree(revWalk.parseCommit(lastCommitId).getTree());
+                treeWalk.setRecursive(true);
+                treeWalk.setFilter(org.eclipse.jgit.treewalk.filter.PathFilter.create(filePath));
+                
+                if (!treeWalk.next()) {
+                    throw new IOException("Cannot find file at path: " + filePath);
+                }
+
+                ObjectId objectId = treeWalk.getObjectId(0);
+                ObjectLoader loader = repository.open(objectId);
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                loader.copyTo(out);
+
+                System.out.println("File Content:\n" + out.toString()); // Print file content
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+
