@@ -1,0 +1,131 @@
+If you only have a commit ID and don’t have access to the local repository path, you’ll need access to a remote Git service like GitHub, GitLab, or Bitbucket, where you can look up the commit using the commit ID. Unfortunately, a commit ID alone does not contain information about the repository URL, so you must have some additional information, such as:
+	1.	The repository hosting service (e.g., GitHub, GitLab).
+	2.	Possibly the organization or username associated with the repository.
+
+Here’s how you can approach it depending on the information you have:
+
+Option 1: If You Have the Repository Hosting Service and Organization/Username
+
+If you know which organization or user the repository belongs to and the hosting service (e.g., GitHub), you can use the API provided by the service to search for the commit by ID within the organization’s repositories.
+
+Example Code: GitHub API to Find Repository by Commit ID
+
+This code assumes you know the organization or user and the commit ID, and you will search through repositories in that organization to find the one containing the commit.
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.Base64;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public class GitHubCommitSearcher {
+
+    public static void main(String[] args) {
+        String organization = "your-organization-name";   // Replace with the organization or username
+        String commitId = "your-commit-id";               // The commit ID you're looking for
+        String token = "your-github-token";               // Optional: GitHub token for authentication
+
+        String repoUrl = findRepositoryByCommit(organization, commitId, token);
+        if (repoUrl != null) {
+            System.out.println("Repository URL containing the commit: " + repoUrl);
+        } else {
+            System.out.println("No repository found with the given commit ID.");
+        }
+    }
+
+    public static String findRepositoryByCommit(String organization, String commitId, String token) {
+        try {
+            // Step 1: List repositories in the organization
+            String apiUrl = "https://api.github.com/orgs/" + organization + "/repos";
+            HttpURLConnection connection = (HttpURLConnection) new URL(apiUrl).openConnection();
+
+            // Optional: Add Authorization header if you have a GitHub token
+            if (token != null && !token.isEmpty()) {
+                String auth = "Bearer " + token;
+                connection.setRequestProperty("Authorization", auth);
+            }
+
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                BufferedReader in = new BufferedReader(new InputStreamReader(connection.getInputStream()));
+                String response = in.lines().collect(java.util.stream.Collectors.joining());
+                in.close();
+
+                // Step 2: Parse the JSON response to get the list of repositories
+                JSONArray repos = new JSONArray(response);
+                for (int i = 0; i < repos.length(); i++) {
+                    JSONObject repo = repos.getJSONObject(i);
+                    String repoName = repo.getString("name");
+
+                    // Step 3: Check if the commit exists in the repository
+                    if (checkCommitExistsInRepo(organization, repoName, commitId, token)) {
+                        return repo.getString("html_url");  // Repository URL
+                    }
+                }
+            } else {
+                System.out.println("Failed to list repositories, response code: " + responseCode);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public static boolean checkCommitExistsInRepo(String organization, String repoName, String commitId, String token) {
+        try {
+            // API endpoint to get commit information in a specific repository
+            String commitApiUrl = "https://api.github.com/repos/" + organization + "/" + repoName + "/commits/" + commitId;
+            HttpURLConnection connection = (HttpURLConnection) new URL(commitApiUrl).openConnection();
+
+            // Optional: Add Authorization header if you have a GitHub token
+            if (token != null && !token.isEmpty()) {
+                String auth = "Bearer " + token;
+                connection.setRequestProperty("Authorization", auth);
+            }
+
+            connection.setRequestMethod("GET");
+            connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                // If the response is 200 OK, the commit exists in this repository
+                return true;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return false;
+    }
+}
+
+Explanation
+
+	1.	List Repositories in the Organization:
+	•	The findRepositoryByCommit method first lists all repositories under the specified organization using the GitHub API endpoint: https://api.github.com/orgs/{organization}/repos.
+	2.	Check Each Repository for the Commit:
+	•	For each repository, the checkCommitExistsInRepo method checks if the specified commit ID exists. It uses the API endpoint https://api.github.com/repos/{organization}/{repoName}/commits/{commitId}.
+	•	If the commit exists, GitHub returns a 200 OK response. Otherwise, it returns a 404 Not Found.
+	3.	Return the Repository URL:
+	•	If the commit is found in a repository, the repository’s URL is returned. If no repository contains the commit, the function returns null.
+
+Important Notes
+
+	•	Rate Limits: GitHub API requests are rate-limited, especially for unauthenticated requests. Use a GitHub token to increase the limit if necessary.
+	•	Private Repositories: If you’re checking a private repository, you’ll need to authenticate with a GitHub token that has access to the organization’s repositories.
+	•	Performance: This approach may be slow if the organization has many repositories, as it needs to check each repository individually for the commit.
+
+Limitations
+
+This approach assumes:
+	•	You know the organization or user name.
+	•	The repositories you’re searching are hosted on GitHub.
+
+If you don’t have any information about the repository hosting service or the organization/user, it’s not possible to find the repository URL with only a commit ID, as commit IDs are not globally unique across all repositories.
+
+Let me know if you need further assistance with this approach!
