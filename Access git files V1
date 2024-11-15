@@ -657,4 +657,152 @@ public class RemoteFileReader {
     }
 }
 
+----------------
+
+
+To download a specific folder like test from a Git repository without cloning the entire repository using JGit, you can directly interact with the repository’s remote references and trees. This approach avoids a full clone and fetches only the necessary data for the specified folder.
+
+Steps to Download the test Folder Using JGit Without Cloning
+
+	1.	Connect to the Remote Repository: Use JGit to connect to the repository.
+	2.	Access the Remote Tree: Use the ls-remote command to get references (branches/tags) from the remote repository.
+	3.	Read the Tree for the Specified Folder: Traverse the Git tree to find the test folder.
+	4.	Download Files in the Folder: Fetch the blobs (file content) for the specified folder and save them locally.
+
+Code Example
+
+Below is an example using JGit to download a specific folder (test) from a remote Git repository:
+
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.lib.*;
+import org.eclipse.jgit.revwalk.*;
+import org.eclipse.jgit.transport.*;
+import org.eclipse.jgit.treewalk.*;
+import java.io.*;
+import java.util.*;
+
+public class GitFolderDownloader {
+
+    public static void main(String[] args) {
+        String repoUrl = "https://github.com/user/repository.git"; // Replace with your repository URL
+        String branch = "main";                                   // Branch name
+        String folderPath = "test";                               // Path to the folder to download
+        String localSavePath = "/path/to/local/folder";           // Local directory to save the folder
+
+        try {
+            // Step 1: Connect to the remote repository
+            Repository repository = connectToRemoteRepository(repoUrl, branch);
+
+            // Step 2: Traverse the tree and find the folder
+            downloadFolder(repository, branch, folderPath, localSavePath);
+
+            System.out.println("Folder downloaded successfully to " + localSavePath);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static Repository connectToRemoteRepository(String repoUrl, String branch) throws IOException, GitAPIException {
+        // Fetch the remote repository references
+        Map<String, Ref> remoteRefs = Git.lsRemoteRepository()
+                .setRemote(repoUrl)
+                .setHeads(true)
+                .setTags(false)
+                .callAsMap();
+
+        // Get the reference for the specified branch
+        Ref branchRef = remoteRefs.get("refs/heads/" + branch);
+        if (branchRef == null) {
+            throw new IllegalArgumentException("Branch " + branch + " not found in the repository.");
+        }
+
+        // Return a bare repository instance (in-memory)
+        RepositoryBuilder builder = new RepositoryBuilder();
+        return builder.setBare().build();
+    }
+
+    private static void downloadFolder(Repository repository, String branch, String folderPath, String localSavePath) throws IOException {
+        // Get the object ID of the branch's latest commit
+        ObjectId lastCommitId = repository.resolve(branch);
+
+        // Read the commit tree
+        try (RevWalk revWalk = new RevWalk(repository)) {
+            RevCommit commit = revWalk.parseCommit(lastCommitId);
+            RevTree tree = commit.getTree();
+
+            // Traverse the tree to find the folder
+            try (TreeWalk treeWalk = new TreeWalk(repository)) {
+                treeWalk.addTree(tree);
+                treeWalk.setRecursive(true); // Recursive to search for files in subdirectories
+
+                while (treeWalk.next()) {
+                    String path = treeWalk.getPathString();
+                    if (path.startsWith(folderPath)) {
+                        // Download each file in the folder
+                        ObjectId objectId = treeWalk.getObjectId(0);
+                        saveBlobToFile(repository, objectId, path, localSavePath);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void saveBlobToFile(Repository repository, ObjectId blobId, String filePath, String localSavePath) throws IOException {
+        // Open the blob (file content)
+        ObjectLoader loader = repository.open(blobId);
+
+        // Create the local file
+        File file = new File(localSavePath, filePath);
+        file.getParentFile().mkdirs();
+
+        try (OutputStream out = new FileOutputStream(file)) {
+            loader.copyTo(out);
+        }
+
+        System.out.println("Downloaded file: " + file.getAbsolutePath());
+    }
+}
+
+
+Explanation
+
+	1.	Connect to Remote Repository:
+	•	The lsRemoteRepository method fetches the references (branches) from the remote repository.
+	•	The refs/heads/main branch is resolved to its commit ID.
+	2.	Traverse the Tree:
+	•	The TreeWalk class is used to traverse the Git tree. It recursively iterates through all files and folders in the repository.
+	•	Files under the specified folder (test) are filtered and processed.
+	3.	Download Files:
+	•	For each file in the test folder, the ObjectLoader reads the blob content, and the content is saved to a local file.
+	4.	Local Directory Structure:
+	•	The local folder structure mirrors the remote structure. Files are saved under the localSavePath directory.
+
+Notes
+
+	•	Bare Repository:
+	•	A “bare” repository is used, meaning the repository is not cloned but accessed directly in memory.
+	•	No .git directory is created locally.
+	•	Authentication:
+	•	If the repository is private, you can use UsernamePasswordCredentialsProvider with lsRemoteRepository():
+
+
+Git.lsRemoteRepository()
+    .setRemote(repoUrl)
+    .setCredentialsProvider(new UsernamePasswordCredentialsProvider("username", "token"))
+    .callAsMap();
+
+
+	•	Performance:
+	•	This approach is lightweight as it fetches only the required files (blobs) and avoids downloading the entire repository.
+	•	Limitations:
+	•	JGit does not natively support partial clones, so this method relies on traversing the tree in memory and downloading individual blobs.
+
+This code efficiently downloads a specific folder without cloning the repository. Let me know if you have further questions!
+
+
+
+
+
+
+
 
