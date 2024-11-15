@@ -800,6 +800,154 @@ Git.lsRemoteRepository()
 This code efficiently downloads a specific folder without cloning the repository. Let me know if you have further questions!
 
 
+------------------
+
+The error message in your screenshot indicates:
+
+	java.lang.IllegalArgumentException: One of setGitDir or setWorkTree must be called
+
+This error occurs because JGit’s RepositoryBuilder requires a path for either .git directory (setGitDir) or the working directory (setWorkTree) when building a repository. In the current code, RepositoryBuilder is trying to create an in-memory repository, but it’s missing the required directory configuration.
+
+Solution
+
+Since you don’t want to clone the repository, but only access certain information, you should avoid using RepositoryBuilder to create a local repository without a directory. Instead, modify the code to directly interact with the remote repository. However, if you still want to use RepositoryBuilder, you must specify a .git directory.
+
+Here’s how you can fix it:
+	1.	Directly Use Git.lsRemoteRepository() for Remote Operations:
+	•	Since you’re only retrieving information (like refs) from the remote without cloning, you don’t need to create a Repository object.
+	•	Directly use Git.lsRemoteRepository() to access the remote repository references.
+	2.	Alternative Code Without RepositoryBuilder
+
+Here’s an updated version of the code that avoids using RepositoryBuilder:
+
+
+import org.eclipse.jgit.api.Git;
+import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.lib.ObjectId;
+import org.eclipse.jgit.lib.ObjectLoader;
+import org.eclipse.jgit.lib.Ref;
+import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.revwalk.RevTree;
+import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
+import org.eclipse.jgit.treewalk.TreeWalk;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Map;
+
+public class GitFolderDownloader {
+
+    public static void main(String[] args) {
+        String repoUrl = "https://github.com/user/repository.git"; // Replace with your repository URL
+        String branch = "main";                                   // Branch name
+        String folderPath = "test";                               // Path to the folder to download
+        String localSavePath = "/path/to/local/folder";           // Local directory to save the folder
+
+        try {
+            // Step 1: Connect to the remote repository and get branch reference
+            Ref branchRef = getRemoteBranchRef(repoUrl, branch);
+
+            if (branchRef != null) {
+                // Step 2: Traverse the tree and find the folder
+                downloadFolderFromRemote(repoUrl, branchRef, folderPath, localSavePath);
+                System.out.println("Folder downloaded successfully to " + localSavePath);
+            } else {
+                System.out.println("Branch not found in the repository.");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static Ref getRemoteBranchRef(String repoUrl, String branch) throws GitAPIException {
+        // Fetch the remote repository references
+        Map<String, Ref> remoteRefs = Git.lsRemoteRepository()
+                .setRemote(repoUrl)
+                .setHeads(true)
+                .setCredentialsProvider(new UsernamePasswordCredentialsProvider("username", "token"))
+                .callAsMap();
+
+        // Return the reference for the specified branch
+        return remoteRefs.get("refs/heads/" + branch);
+    }
+
+    private static void downloadFolderFromRemote(String repoUrl, Ref branchRef, String folderPath, String localSavePath) throws IOException, GitAPIException {
+        // Initialize a temporary local repository to operate on the remote tree structure
+        try (Git git = Git.cloneRepository()
+                .setURI(repoUrl)
+                .setDirectory(new File("/tmp/tempRepo"))  // Use a temporary directory
+                .setNoCheckout(true)                      // Avoid checking out files
+                .setCredentialsProvider(new UsernamePasswordCredentialsProvider("username", "token"))
+                .call()) {
+
+            // Access the branch's latest commit tree
+            ObjectId lastCommitId = branchRef.getObjectId();
+            RevCommit commit = git.getRepository().parseCommit(lastCommitId);
+            RevTree tree = commit.getTree();
+
+            // Traverse the tree to find the folder
+            try (TreeWalk treeWalk = new TreeWalk(git.getRepository())) {
+                treeWalk.addTree(tree);
+                treeWalk.setRecursive(true); // Recursive to search for files in subdirectories
+
+                boolean folderFound = false;
+                while (treeWalk.next()) {
+                    String path = treeWalk.getPathString();
+                    if (path.startsWith(folderPath)) {
+                        folderFound = true;
+                        // Download each file in the folder
+                        ObjectId objectId = treeWalk.getObjectId(0);
+                        saveBlobToFile(git.getRepository(), objectId, path, localSavePath);
+                    }
+                }
+
+                if (!folderFound) {
+                    System.out.println("Folder " + folderPath + " not found in the repository.");
+                }
+            }
+        }
+    }
+
+    private static void saveBlobToFile(Repository repository, ObjectId blobId, String filePath, String localSavePath) throws IOException {
+        // Open the blob (file content)
+        ObjectLoader loader = repository.open(blobId);
+
+        // Create the local file
+        File file = new File(localSavePath, filePath);
+        file.getParentFile().mkdirs();
+
+        try (OutputStream out = new FileOutputStream(file)) {
+            loader.copyTo(out);
+        }
+
+        System.out.println("Downloaded file: " + file.getAbsolutePath());
+    }
+}
+
+
+Explanation of Changes
+
+	1.	Avoid RepositoryBuilder:
+	•	Instead of using RepositoryBuilder to create an in-memory repository, we directly interact with the remote repository using Git.lsRemoteRepository() and a temporary local repository.
+	2.	Use a Temporary Repository:
+	•	We use Git.cloneRepository() to create a shallow clone with setNoCheckout(true), so it doesn’t actually check out the files. This allows us to access the repository structure without downloading the entire contents.
+	•	The temporary repository is located in /tmp/tempRepo. You may change this path as needed.
+	3.	Download Folder Content:
+	•	The TreeWalk iterates through the Git tree structure to find files in the specified folderPath.
+	•	The saveBlobToFile function saves each file from the folder to the specified local path.
+	4.	Authentication:
+	•	If the repository is private, use UsernamePasswordCredentialsProvider with your GitHub username and token.
+
+Notes
+
+	•	Temporary Repository Directory: The directory /tmp/tempRepo is used to store a shallow clone of the repository. You can delete this directory after the files have been downloaded.
+	•	No Checkout: The setNoCheckout(true) option prevents the files from being checked out in the local filesystem, which keeps the clone lightweight.
+	•	Exception Handling: The code includes checks for branch existence and folder existence.
+
+This approach provides a way to use JGit to download specific folder content without cloning the entire repository’s history or contents. Let me know if there are any specific exceptions you’re encountering, and I can help troubleshoot further!
+
 
 
 
